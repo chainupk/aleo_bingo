@@ -414,7 +414,7 @@ program aleo_bingo.aleo {
         return new_game_card_state then finalize(player_won, game_card.winning_card, game_card.game_id);
     }
 
-    finalize check_card (player_won: bool, game_card_winning_card: bool, gameId: field) {
+    finalize check_card(player_won: bool, game_card_winning_card: bool, gameId: field) {
         // If his card was not marked as won and he won this round 如果他的牌没有被标记为赢了并且他赢了这一局
         if (player_won && !game_card_winning_card) {
             let number_of_winners: u64 = Mapping::get_or_init(games_rounds_of_winners, gameId, 0u64);
