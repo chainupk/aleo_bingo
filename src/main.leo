@@ -4,7 +4,7 @@ program aleo_bingo.aleo {
     // BingoPublicInfo 是游戏的公开信息
     // BingoPublicInfo is the public information about the game
     struct BingoPublicInfo {
-        max_rounds_of_winners: u32, // maximum winners in a game 游戏中的最大赢家
+        max_rounds_of_winners: u64, // maximum winners in a game 游戏中的最大赢家
         prize_pool: u64, // prize amount of the game 游戏奖金额
     }
 
@@ -96,15 +96,11 @@ program aleo_bingo.aleo {
     // create_game 将创建一个 SimpleBingo 记录
     // create_game will create a SimpleBingo record
     transition create_game(
-            public max_rounds_of_winners: u32, 
+            public max_rounds_of_winners: u64, 
             rounds_of_winners: u64,
             prize_pool: u64,
             game_id: field,
         ) -> SimpleBingo {
-
-            
-        // check the game was not created before 检查之前没有创建游戏
-        assert(!Mapping::get(games_created, game_id));
 
         // public information 公共信息
         let new_bingo_info: BingoPublicInfo = BingoPublicInfo {
@@ -135,15 +131,6 @@ program aleo_bingo.aleo {
     // join_game will create a player's game card for the respective game id
     transition join_game(id: field, game_id: field, board: Board) -> BingoGameCard {
 
-        // check the game has not started 检查游戏还没有开始
-        assert(!Mapping::get(games_started, game_id));
-
-        // check the game has not completed 检查游戏还没有完成
-        assert(!Mapping::get(games_completed, game_id));
-
-        // check unique card id 检查唯一的卡 ID
-        assert(!Mapping::get(gamecards, id));
-
         // create game card 创建游戏卡
         let game_Card: BingoGameCard = BingoGameCard {
             game_id: game_id,
@@ -154,12 +141,21 @@ program aleo_bingo.aleo {
             content: board,
         };
 
-        return game_Card then finalize(self.caller, game_id);
+        return game_Card then finalize(self.caller, game_id, id);
     }
 
     // finalize-join_game 将增加游戏的玩家数量
     // finalize-join_game will increment the player count for the game
-    finalize join_game(player: address, game_id: field) {
+    finalize join_game(player: address, game_id: field, id: field) {
+        // check the game has not started 检查游戏还没有开始
+        assert(!Mapping::get(games_started, game_id));
+
+        // check the game has not completed 检查游戏还没有完成
+        assert(!Mapping::get(games_completed, game_id));
+
+        // TODO check unique card id, this is currently not available 检查唯一的卡 ID, 这目前不可用
+        // assert(""!=Mapping::get(gamecards, id));
+
         let current_game_id: field = Mapping::get(players_to_game, self.caller);
 
         // should also check that his previous game has ended 还应该检查他之前的游戏是否已经结束
@@ -178,10 +174,6 @@ program aleo_bingo.aleo {
     transition start_game (game: SimpleBingo) -> SimpleBingo {
         // check game created is indeed the owner 检查创建的游戏确实是所有者
         assert(game.owner == self.caller);
-        // check the game has not started 检查游戏还没有开始
-        assert(!Mapping::get(games_started, game.id));
-        
-        Mapping::set(games_started, game.id, true);
 
         return SimpleBingo {
             owner: self.caller,
@@ -190,25 +182,19 @@ program aleo_bingo.aleo {
         } then finalize(game.id);
     }
 
+    finalize start_game(gameId: field) {
+        // check the game has not started 检查游戏还没有开始
+        assert(!Mapping::get(games_started, gameId));
+        
+        Mapping::set(games_started, gameId, true);
+    }
+
     // next_round 将开始游戏并为 games_started 映射创建键值对
     // next_round will start the game and create the key value pair for games_started mapping
     transition next_round(game: SimpleBingo, column: u8, number: u64, game_round_col: field, game_round_target_value: field) -> SimpleBingo {
         // check that only owner can update game state 检查是否只有所有者可以更新游戏状态
         assert(game.owner == self.caller);
-        // check game started 检查游戏开始
-        assert(Mapping::get(games_started, game.id));
-        // check game not complete 检查游戏未完成
-        assert(!Mapping::get(games_completed, game.id));
         // TODO check for proof of randomness 检查随机性证明
-
-        // set new round number 设置新的轮数
-        let new_round_number: u64 = Mapping::get(game_round_number, game.id) + 1u64;
-        Mapping::set(game_round_number, game.id, new_round_number);
-        // TODO Because there's no way I can type cast now, I cannot compare the inputs 因为我现在无法输入 cast，所以我无法比较输入
-        // For now we will just take it as it is 现在我们将按原样接受它
-
-        assert(!Mapping::get(column_game_round, game_round_col));
-        assert(!Mapping::get(game_round_value, game_round_target_value));
 
         // new public information 新的公开信息
         let new_bingo_info: BingoPublicInfo = BingoPublicInfo {
@@ -223,10 +209,27 @@ program aleo_bingo.aleo {
             public_info: new_bingo_info,
         };
 
+        return new_bingo_state then finalize(game.id, game_round_col, game_round_target_value, column, number);
+    }
+
+    finalize next_round (gameId: field, game_round_col: field, game_round_target_value: field, column: u8, number: u64 ) {
+        // check game started 检查游戏开始
+        assert(Mapping::get(games_started, gameId));
+        // check game not complete 检查游戏未完成
+        assert(!Mapping::get(games_completed, gameId));
+
+        // set new round number 设置新的轮数
+        let new_round_number: u64 = Mapping::get(game_round_number, gameId) + 1u64;
+        Mapping::set(game_round_number, gameId, new_round_number);
+        // TODO Because there's no way I can type cast now, I cannot compare the inputs 因为我现在无法输入 cast，所以我无法比较输入
+        // For now we will just take it as it is 现在我们将按原样接受它
+
+        // TODO check that game round values are unique, this is currently not available, 检查游戏回合值是否唯一，目前不可用
+        // assert(!Mapping::get(column_game_round, game_round_col));
+        // assert(!Mapping::get(game_round_value, game_round_target_value));
+
         Mapping::set(column_game_round, game_round_col, column);
         Mapping::set(game_round_value, game_round_target_value, number);
-
-        return new_bingo_state;
     }
 
     // check_for_win 是检查玩家卡片的网格内容是否赢得游戏的函数。由 check_card 转换函数使用
@@ -264,10 +267,7 @@ program aleo_bingo.aleo {
 
     // check_card 将检查玩家的游戏卡，如果玩家赢了则更新 games_rounds_of_winners 并更新游戏卡的状态。
     // check_card will check the player's game card, update games_rounds_of_winners if the player won and update game card's state.
-    transition check_card(game_card: BingoGameCard, game_round_col: field, game_round_target_value: field) -> BingoGameCard {
-        let target_col: u8 = Mapping::get(column_game_round, game_round_col);
-        let target_value: u64 = Mapping::get(game_round_value, game_round_target_value);
-
+    transition check_card(game_card: BingoGameCard, target_col: u8, target_value: u64) -> BingoGameCard {
         let r1c1_hit: bool = game_card.content.r1.c1_hit;
         let r2c1_hit: bool = game_card.content.r2.c1_hit;
         let r3c1_hit: bool = game_card.content.r3.c1_hit;
@@ -402,12 +402,6 @@ program aleo_bingo.aleo {
         // check if player won 检查玩家是否赢了
         let player_won: bool = check_for_win(updated_card);
 
-        // If his card was not marked as won and he won this round 如果他的牌没有被标记为赢了并且他赢了这一局
-        if (player_won && !game_card.winning_card) {
-            let number_of_winners: u64 = Mapping::get_or_init(games_rounds_of_winners, game_card.game_id, 0u64);
-            Mapping::set(games_rounds_of_winners, game_card.game_id, number_of_winners + 1u64);
-        }
-
         let new_game_card_state: BingoGameCard = BingoGameCard {
             game_id: game_card.game_id,
             id: game_card.id,
@@ -417,23 +411,32 @@ program aleo_bingo.aleo {
             content: updated_card,
         };
 
-        return new_game_card_state;
+        return new_game_card_state then finalize(player_won, game_card.winning_card, game_card.game_id);
+    }
+
+    finalize check_card (player_won: bool, game_card_winning_card: bool, gameId: field) {
+        // If his card was not marked as won and he won this round 如果他的牌没有被标记为赢了并且他赢了这一局
+        if (player_won && !game_card_winning_card) {
+            let number_of_winners: u64 = Mapping::get_or_init(games_rounds_of_winners, gameId, 0u64);
+            Mapping::set(games_rounds_of_winners, gameId, number_of_winners + 1u64);
+        }
     }
 
     // check_winners 将被游戏所有者调用以查看游戏是否结束。
     // check_winners will be called by the game's owner to see if the game has ended.
-    transition check_winners(game: SimpleBingo) -> bool {
+    transition check_winners(game: SimpleBingo) {
         // check that they are the owner of the game 检查他们是否是游戏的所有者
         assert(game.owner == self.caller);
 
-        let number_of_winners: u64 = Mapping::get(games_rounds_of_winners, game.id);
+        return then finalize(game.id, game.public_info.max_rounds_of_winners);
+    }
+
+    finalize check_winners(gameId: field, max_rounds_of_winners: u64) {
+        let number_of_winners: u64 = Mapping::get(games_rounds_of_winners, gameId);
 
         // if it hits the number of winners, game ends 如果达到获胜者的数量，游戏结束
-        if (number_of_winners >= game.public_info.max_rounds_of_winners) {
-            Mapping::set(games_completed, game.id, true);
-            return true;
-        } else {
-            return false;
+        if (number_of_winners >= max_rounds_of_winners) {
+            Mapping::set(games_completed, gameId, true);
         }
     }
 
